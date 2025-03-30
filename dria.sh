@@ -1,130 +1,242 @@
 #!/bin/bash
 
-NODENAME="dria"
+tput reset
+tput civis
 
-# Color definitions
-export RED='\033[0;31m'
-export YELLOW='\033[1;33m'
-export GREEN='\033[0;32m'
-export NC='\033[0m'  # No Color
+# Color functions
+show_orange() {
+    echo -e "\e[33m$1\e[0m"
+}
 
-# Welcome message
-echo -e "${YELLOW}Starting Dria node installation...${NC}"
-read -p "Please make sure to run this in a screen session (press Enter to continue): "
+show_blue() {
+    echo -e "\e[34m$1\e[0m"
+}
 
-# Update packages and install dependencies
-echo -e "${YELLOW}Updating packages and installing dependencies...${NC}"
-sudo apt update && sudo apt install -y ca-certificates curl gnupg ufw expect
+show_green() {
+    echo -e "\e[32m$1\e[0m"
+}
 
-# Docker installation function
-dockerSetup(){
-    if ! command -v docker &> /dev/null; then
-        echo "Installing Docker..."
+show_red() {
+    echo -e "\e[31m$1\e[0m"
+}
 
-        # Remove conflicting packages
-        for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
-            sudo apt-get remove -y $pkg
-        done
+exit_script() {
+    show_red "Script stopped"
+    echo
+    exit 0
+}
 
-        # Install Docker prerequisites
-        sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        
-        # Install Docker
-        sudo apt update -y && sudo apt install -y docker-ce docker-ce-cli containerd.io
-        sudo systemctl start docker
-        sudo systemctl enable docker
+incorrect_option() {
+    echo
+    show_red "Invalid option. Please choose from the available options."
+    echo
+}
 
-        echo "Installing Docker Compose..."
+process_notification() {
+    local message="$1"
+    show_orange "$message"
+    sleep 1
+}
 
-        # Install Docker Compose
-        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
+run_commands() {
+    local commands="$*"
 
-        echo -e "${GREEN}Docker installed successfully.${NC}"
-
+    if eval "$commands"; then
+        sleep 1
+        echo
+        show_green "Success"
+        echo
     else
-        echo -e "${GREEN}Docker is already installed.${NC}"
+        sleep 1
+        echo
+        show_red "Failed"
+        echo
     fi
 }
 
-# Initial setup function
-setup() {
-    cd /root
-    if [ -d "$NODENAME" ]; then
-        echo -e "${GREEN}/root/$NODENAME directory already exists. Removing...${NC}"
-        rm -rf $NODENAME
-        echo -e "${YELLOW}Removed /root/$NODENAME directory.${NC}"
+check_rust_version() {
+    if command -v rustc &> /dev/null; then
+        INSTALLED_RUST_VERSION=$(rustc --version | awk '{print $2}')
+        show_orange "Installed Rust version: $INSTALLED_RUST_VERSION"
+    else
+        INSTALLED_RUST_VERSION=""
+        show_blue "Rust not installed"
     fi
-
-    mkdir $NODENAME
-    echo -e "${YELLOW}Created /root/$NODENAME directory.${NC}"
-    cd $NODENAME
+    echo
 }
 
-# Node installation function
-installRequirements(){
-    echo -e "${YELLOW}Installing required packages for $NODENAME...${NC}"
-    sleep 2
-
-    # Install unzip if not present
-    if ! command -v unzip &> /dev/null; then
-        echo -e "${YELLOW}Installing unzip...${NC}"
-        sudo apt install unzip -y
-        echo -e "${GREEN}Unzip installed.${NC}"
+install_or_update_rust() {
+    if [ -z "$INSTALLED_RUST_VERSION" ]; then
+        process_notification "Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        show_green "Rust installed successfully"
+    elif [ "$INSTALLED_RUST_VERSION" != "$LATEST_RUST_VERSION" ]; then
+        process_notification "Updating Rust"
+        rustup update
+        show_green "Rust updated successfully"
     else
-        echo -e "${GREEN}Unzip is already installed.${NC}"
+        show_green "Rust already at latest version ($LATEST_RUST_VERSION)"
     fi
-
-    # Install Ollama if not present
-    if ! command -v ollama &> /dev/null; then
-        echo -e "${YELLOW}Installing Ollama...${NC}"
-        curl -fsSL https://ollama.com/install.sh | sh
-        echo -e "${GREEN}Ollama installed.${NC}"
-    else
-        echo -e "${GREEN}Ollama is already installed.${NC}"
-    fi
-
-    echo -e "${YELLOW}Installing $NODENAME compute node...${NC}"
-
-    # Check if dkn-compute-node directory exists
-    if [ -d "/root/$NODENAME/dkn-compute-node" ]; then
-        echo -e "${GREEN}Existing dkn-compute-node directory found. Continuing installation...${NC}"
-    fi
-
-    # Remove old zip file if exists
-    if [ -f "/root/$NODENAME/dkn-compute-node.zip" ]; then
-        echo -e "${YELLOW}Removing old dkn-compute-node.zip file...${NC}"
-        rm -f /root/$NODENAME/dkn-compute-node.zip
-    fi
-
-    # Download and extract the node
-    echo -e "${YELLOW}Downloading dkn-compute-node.zip...${NC}"
-    curl -L -o dkn-compute-node.zip https://github.com/firstbatchxyz/dkn-compute-launcher/releases/latest/download/dkn-compute-launcher-linux-amd64.zip
-    echo -e "${YELLOW}Extracting dkn-compute-node.zip...${NC}"
-    unzip dkn-compute-node.zip -d /root/$NODENAME/
-    rm /root/$NODENAME/dkn-compute-node.zip 
-    cd /root/$NODENAME/dkn-compute-node
-    echo -e "${GREEN}$NODENAME compute node installed successfully.${NC}"
+    echo
 }
 
-# Node execution function
-run() {
-    echo -e "${YELLOW}Join our Discord: https://discord.com/invite/dria${NC}"
-    echo -e "${YELLOW}Dashboard: https://dria.co/edge-ai/${NC}"
-    echo -e "${YELLOW}When prompted to select models, we recommend: Ollama${NC}"
-    echo -e "${GREEN}The first run will perform tests. If tests pass, detach from screen and create a new session to run the node permanently.${NC}"
-    read -p "Do you want to start the node now? (y/n): " response
-    if [[ $response == "y" ]]; then
-        ./dkn-compute-launcher
-    else
-        echo -e "${GREEN}LFG (Let's F***ing Go)${NC}"
-    fi
+print_logo() {
+    echo
+    show_orange "  _______  .______       __       ___ " && sleep 0.2
+    show_orange " |       \ |   _  \     |  |     /   \ " && sleep 0.2
+    show_orange " |  .--.  ||  |_)  |    |  |    /  ^  \ " && sleep 0.2
+    show_orange " |  |  |  ||      /     |  |   /  /_\  \ " && sleep 0.2
+    show_orange " |  '--'  ||  |\  \----.|  |  /  _____  \ " && sleep 0.2
+    show_orange " |_______/ | _|  ._____||__| /__/     \__\ " && sleep 0.2
+    echo
+    sleep 1
 }
 
-# Main execution flow
-dockerSetup
-setup
-installRequirements
-run
+while true; do
+    print_logo
+    show_green "------ MAIN MENU ------ "
+    echo "1. Preparation"
+    echo "2. Installation"
+    echo "3. Configuration"
+    echo "4. Node Management"
+    echo "5. View Logs"
+    echo "6. Uninstall"
+    echo "7. Exit"
+    echo
+    read -p "Select option: " option
+
+    case $option in
+        1)
+            # PREPARATION
+            process_notification "Starting system preparation..."
+            run_commands "cd $HOME && sudo apt update && sudo apt upgrade -y && sudo apt install -y screen"
+
+            process_notification "Checking Rust installation..."
+            sleep 2
+            install_or_update_rust
+
+            process_notification "Installing Ollama..."
+            run_commands "curl -fsSL https://ollama.com/install.sh | sh"
+            echo
+            show_green "$(ollama --version)"
+            echo
+            show_green "--- PREPARATION COMPLETED ---"
+            echo
+            ;;
+        2)
+            # INSTALLATION
+            process_notification "Installing Dria node..."
+            run_commands "curl -fsSL https://dria.co/launcher | bash"
+            show_green "--- INSTALLATION COMPLETED ---"
+            echo
+            ;;
+        3)
+            # CONFIGURATION
+            echo
+            while true; do
+                show_green "------ CONFIGURATION MENU ------ "
+                echo "1. Wallet, Port, Models, API"
+                echo "2. Referral code"
+                echo "3. Back to main menu"
+                echo
+                read -p "Select option: " option
+                echo
+                case $option in
+                    1)
+                        # Wallet, Port, Models, API
+                        dkn-compute-launcher settings
+                        ;;
+                    2)
+                        # referrals
+                        dkn-compute-launcher referrals
+                        ;;
+                    3)
+                        # EXIT
+                        break
+                        ;;
+                    *)
+                        incorrect_option
+                        ;;
+                esac
+            done
+            ;;
+        4)
+            # NODE MANAGEMENT
+            echo
+            while true; do
+                show_green "------ NODE MANAGEMENT MENU ------ "
+                echo "1. Start node"
+                echo "2. Stop node"
+                echo "3. Update node"
+                echo "4. Back to main menu"
+                echo
+                read -p "Select option: " option
+                echo
+                case $option in
+                    1)
+                        # START
+                        process_notification "Starting Dria node..."
+                        screen -dmS dria bash -c "cd $HOME/ && dkn-compute-launcher start"
+                        show_green "Node started in screen session 'dria'"
+                        ;;
+                    2)
+                        # STOP
+                        process_notification "Stopping Dria node..."
+                        run_commands "screen -r dria -X quit"
+                        ;;
+                    3)
+                        # UPDATE
+                        cd $HOME/
+                        dkn-compute-launcher update
+                        ;;
+                    4)
+                        break
+                        ;;
+                    *)
+                        incorrect_option
+                        ;;
+                esac
+            done
+            ;;
+        5)
+            # LOGS
+            process_notification "Connecting to node logs..." && sleep 2
+            cd $HOME && screen -r dria
+            ;;
+        6)
+            # UNINSTALL
+            process_notification "Uninstalling Dria node..."
+            echo
+            while true; do
+                read -p "Confirm node uninstall? (yes/no): " option
+
+                case "$option" in
+                    yes|y|Y|Yes|YES)
+                        process_notification "Stopping node..."
+                        run_commands "screen -r dria -X quit"
+
+                        run_commands "dkn-compute-launcher uninstall"
+
+                        show_green "--- NODE UNINSTALLED SUCCESSFULLY ---"
+                        break
+                        ;;
+                    no|n|N|No|NO)
+                        process_notification "Uninstall cancelled"
+                        echo ""
+                        break
+                        ;;
+                    *)
+                        incorrect_option
+                        ;;
+                esac
+            done
+            ;;
+        7)
+            exit_script
+            ;;
+        *)
+            incorrect_option
+            ;;
+    esac
+done
